@@ -1,18 +1,20 @@
 from flaskext.mysql import MySQL
+import json
 
 
 class Database:
     def __init__(self, app):
+        self.app = app
         self.mysql = MySQL()
-        self._addConfig(app)
-        self.mysql.init_app(app)
+        self._addConfig()
+        self.mysql.init_app(self.app)
         self.conn = self.mysql.connect()
 
-    def _addConfig(self, app):
-        app.config["MYSQL_DATABASE_USER"] = "root"
-        app.config["MYSQL_DATABASE_PASSWORD"] = "123456789"
-        app.config["MYSQL_DATABASE_DB"] = "bicycle_shop"
-        app.config["MYSQL_DATABASE_HOST"] = "localhost"
+    def _addConfig(self):
+        self.app.config["MYSQL_DATABASE_USER"] = "root"
+        self.app.config["MYSQL_DATABASE_PASSWORD"] = "123456789"
+        self.app.config["MYSQL_DATABASE_DB"] = "bicycle_shop"
+        self.app.config["MYSQL_DATABASE_HOST"] = "localhost"
 
     def query(self, sql):
         cursor = self.conn.cursor()
@@ -22,12 +24,35 @@ class Database:
         rows = []
         for value in values:
             rows.append(dict(zip(keys, value)))
+        if len(rows) == 1:
+            if "last_connection" in rows[0].keys():
+                rows[0]["last_connection"] = rows[0]["last_connection"].strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
+            if "create_time" in rows[0].keys():
+                rows[0]["create_time"] = rows[0]["create_time"].strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                )
         return rows
+
+    def add_user(self, user):
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(user)
+            result = cursor.fetchone()
+            self.conn.commit()
+            if result is None:
+                return [None, "Registration done!", True]
+            else:
+                return ["An error occurred while registering", False]
+        except Exception as e:
+            err = e.args
+            return [err[0], err[1], False]
 
 
 class Queries:
     def findOne(db, name):
-        q = "SELECT * FROM bike WHERE name = " + '"{}"'.format(name)
+        q = "SELECT * FROM bike WHERE name = '{}'".format(name)
         data = db.query(q)
         return data
 
@@ -40,6 +65,44 @@ class Queries:
         sqlQuery = sqlConverter(checkSelection)
         query = db.query(sqlQuery)
         return query
+
+    def create_user(db, data):
+        q = "INSERT INTO users_profil (first_name, last_name, password, email, phone_number, city, country, create_time, last_connection) VALUES ('{}','{}','{}','{}','{}','{}','{}', NOW(), NOW())"
+        user_query = q.format(
+            data["first_name"],
+            data["last_name"].upper(),
+            data["password"],
+            data["email"],
+            data["phone"],
+            data["city"].upper(),
+            data["country"].upper(),
+        )
+        userStatus = db.add_user(user_query)
+        return {
+            "email": data["email"],
+            "error_code": userStatus[0],
+            "error": userStatus[1],
+            "continue": userStatus[2],
+        }
+
+    def login(db, data):
+        q = "SELECT * FROM users_profil WHERE email = '{}'".format(data["email"])
+        user_data = db.query(q)
+
+        # check if email exist
+        if len(user_data) == 0:
+            return {
+                "continue": False,
+                "error_message": "Invalid email",
+                "error_field": "email",
+            }
+        if data["password"] != user_data[0]["password"]:
+            return {
+                "continue": False,
+                "error_message": "Invalid password",
+                "error_field": "password",
+            }
+        return {"continue": True, "data": user_data[0]}
 
 
 def allSelected(req):
