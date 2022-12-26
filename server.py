@@ -64,18 +64,47 @@ class Sign_in(Resource):
 class Newsletter(Resource):
     def post(self):
         data = request.get_json()
+        response = {}
+        response["email"] = data["email"]
         if data["email"] in email:
-            return Response(
-                json.dumps({"email": data["email"], "action": "Already"}),
-                mimetype="application/json",
+            response["message"] = "{} is already to the newsletter.".format(
+                data["email"]
             )
-        with open("newsletter.py", "r+") as f:
-            contenu = f.read()
-            contenu = contenu.replace("]", ",'" + str(data["email"]) + "']")
-            f.seek(0)
-            f.write(contenu)
+            response["color"] = "white"
+            response["background"] = "#F49D1A"
+        else:
+            with open("newsletter.py", "r+") as f:
+                contenu = f.read()
+                contenu = contenu.replace("]", ",'" + str(data["email"]) + "']")
+                f.seek(0)
+                f.write(contenu)
+            response["message"] = "{} is subscribed to the newsletter.".format(
+                data["email"]
+            )
+            response["color"] = "white"
+            response["background"] = "green"
+        return response
 
-        return {"email": data["email"], "action": "Added"}
+
+class Order(Resource):
+    def post(self):
+        data = request.get_json()
+        Database.add_order(db, data["client"], data["items"])
+        return {"continue": True}
+
+    def get(self):
+        user_id = request.args["id"]
+        rows = db.query(
+            "SELECT * FROM orders AS o JOIN order_items AS oi ON o.id = oi.order_id WHERE o.client_id = {}".format(
+                user_id
+            )
+        )
+        rows_order = {}
+        for order in rows:
+            if not str(order["order_id"]) in rows_order:
+                rows_order[str(order["order_id"])] = []
+            rows_order[str(order["order_id"])].append(order)
+        return rows_order
 
 
 api.add_resource(Bikes, "/")
@@ -85,6 +114,7 @@ api.add_resource(Sign_in, "/login")
 api.add_resource(Sign_up, "/create_account")
 api.add_resource(Newsletter, "/newsletter")
 api.add_resource(User, "/user")
+api.add_resource(Order, "/order")
 
 if __name__ == "__main__":
     app.run(debug=True, port=4000)

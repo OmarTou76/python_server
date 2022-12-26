@@ -1,5 +1,5 @@
 from flaskext.mysql import MySQL
-import json
+import datetime
 
 
 class Database:
@@ -22,18 +22,20 @@ class Database:
         keys = [x[0] for x in cursor.description]
         values = cursor.fetchall()
         rows = []
-        for value in values:
-            rows.append(dict(zip(keys, value)))
-        if len(rows) == 1:
-            if "last_connection" in rows[0].keys():
-                rows[0]["last_connection"] = rows[0]["last_connection"].strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
-            if "create_time" in rows[0].keys():
-                rows[0]["create_time"] = rows[0]["create_time"].strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                )
+        for row in values:
+            for i, value in enumerate(row):
+                if isinstance(value, datetime.datetime):
+                    new_value = value.strftime("%Y-%m-%d %H:%M:%S")
+                    row = row[:i] + (new_value,) + row[i + 1 :]
+            rows.append(dict(zip(keys, row)))
+        self.conn.commit()
         return rows
+
+    def update_user(self, req):
+        cursor = self.conn.cursor()
+        cursor.execute(req)
+        self.conn.commit
+        cursor.close()
 
     def add_user(self, user):
         try:
@@ -48,6 +50,28 @@ class Database:
         except Exception as e:
             err = e.args
             return [err[0], err[1], False]
+
+    def add_order(self, client, order):
+        cursor = self.conn.cursor()
+        order_q = "INSERT INTO orders (client_id) VALUES ({})".format(int(client))
+        cursor.execute(order_q)
+        self.conn.commit()
+        order_id = cursor.lastrowid
+        item_q = "INSERT INTO order_items (order_id, name_item, size, quantity, price) VALUES ({}, '{}', '{}', {}, {})"
+        for item in order:
+            # pb with quote ('')
+            size = item["size"].replace("'", "\\'")
+            cursor.execute(
+                item_q.format(
+                    int(order_id),
+                    item["name"],
+                    size,
+                    int(item["quantity"]),
+                    int(item["price"]),
+                )
+            )
+        self.conn.commit()
+        cursor.close()
 
 
 class Queries:
@@ -78,6 +102,20 @@ class Queries:
             data["country"].upper(),
         )
         userStatus = db.add_user(user_query)
+
+        # if user is added
+        if userStatus[2] == True:
+            user = db.query(
+                "SELECT * FROM users_profil WHERE email = '{}'".format(data["email"])
+            )
+            return {
+                "email": data["email"],
+                "user": user[0],
+                "error_code": userStatus[0],
+                "error": userStatus[1],
+                "continue": userStatus[2],
+            }
+
         return {
             "email": data["email"],
             "error_code": userStatus[0],
@@ -87,6 +125,12 @@ class Queries:
 
     def login(db, data):
         q = "SELECT * FROM users_profil WHERE email = '{}'".format(data["email"])
+        db.update_user(
+            "UPDATE users_profil SET last_connection = NOW() WHERE email = '{}'".format(
+                data["email"]
+            )
+        )
+
         user_data = db.query(q)
 
         # check if email exist
